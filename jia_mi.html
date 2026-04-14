@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔐 密文站点解码器 · 自适应托管</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; font-family: system-ui, 'Segoe UI', Roboto, sans-serif; }
+        body { background: linear-gradient(145deg, #0b1120 0%, #141b2b 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .card { background: rgba(18, 28, 46, 0.92); backdrop-filter: blur(12px); border: 1px solid #2a4c77; border-radius: 36px; box-shadow: 0 25px 40px -10px #000000b0; padding: 32px 28px; max-width: 820px; width: 100%; color: #eef4ff; }
+        h1 { font-weight: 500; font-size: 2rem; border-bottom: 1px solid #2e3a55; padding-bottom: 18px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+        .badge { background: #1e3a5f; padding: 4px 14px; border-radius: 30px; font-size: 0.9rem; color: #9fc5ff; border: 1px solid #3b6b9f; }
+        .info-note { background: #0f1a28; border-left: 6px solid #3d7eb9; padding: 16px 20px; border-radius: 18px; margin: 20px 0; color: #bdd0ec; }
+        .password-row { display: flex; align-items: center; gap: 12px; margin: 15px 0; }
+        .password-input { background: #0c1622; border: 1.5px solid #2a405b; border-radius: 48px; padding: 2px 2px 2px 20px; display: flex; align-items: center; flex: 1; }
+        .password-input input { background: transparent; border: none; padding: 12px 6px 12px 0; color: white; font-size: 1.2rem; width: 100%; outline: none; font-family: monospace; }
+        .password-input span { background: #1e3a5f; padding: 6px 16px; border-radius: 40px; color: #b3d6ff; margin-right: 2px; }
+        .btn { background: #1f3e5c; border: 1px solid #3b6b9f; color: #e3f0ff; padding: 12px 24px; border-radius: 48px; font-weight: 500; cursor: pointer; box-shadow: 0 8px 16px -6px #00000060, 0 1px 0 #5f8ec9 inset; transition: all 0.15s; border: 1px solid #2d6190; }
+        .btn:hover { background: #285a85; border-color: #5c9bd1; transform: translateY(-1px); }
+        .btn-outline { background: transparent; border: 1.5px solid #3c6990; box-shadow: none; }
+        .file-area { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+        .status-box { background: #0b1420e0; border-radius: 24px; padding: 16px 20px; margin: 20px 0; border: 1px solid #2c4968; min-height: 70px; font-family: monospace; }
+        .result-panel { margin-top: 20px; padding-top: 15px; border-top: 1px solid #2e4a6e; }
+        .open-btn { background: #0e4432; border-color: #2b9e6f; font-weight: 600; padding: 14px 30px; }
+        .warning-box { background: #332211; border-left: 6px solid #e6a020; padding: 12px 18px; border-radius: 16px; margin: 15px 0; }
+        .file-list { max-height: 180px; overflow-y: auto; background: #030a12b0; border-radius: 16px; padding: 10px; margin-top: 12px; }
+        .file-item { padding: 6px 10px; border-bottom: 1px dashed #2f4a68; display: flex; align-items: center; gap: 10px; }
+        .file-item a { color: #aad0ff; text-decoration: none; }
+        .file-item a:hover { text-decoration: underline; }
+        button:disabled { opacity: 0.5; pointer-events: none; }
+        .mode-indicator { font-size: 0.9rem; background: #1a2a3f; border-radius: 20px; padding: 4px 12px; display: inline-block; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>🗂️ 密文站点解码器 <span class="badge">n=4096 · 智能托管</span></h1>
+    
+    <div class="info-note">
+        <strong>🔧 自适应模式</strong><br>
+        • 优先使用 Service Worker 创建虚拟站点，支持内部链接跳转。<br>
+        • 若 SW 不可用（非 HTTPS / 浏览器限制），将提供文件列表预览及完整 ZIP 下载，建议本地解压后打开 <code>1/index.html</code>。
+    </div>
+
+    <div class="password-row">
+        <div class="password-input">
+            <input type="number" id="passwordInput" value="4096" min="1" step="1">
+            <span>🔑 n =</span>
+        </div>
+        <button class="btn btn-outline" id="resetN">⟲ 4096</button>
+    </div>
+
+    <div class="file-area">
+        <button class="btn" id="loadDefaultBtn">📂 加载 encrypted.bin</button>
+        <label class="btn btn-outline" style="cursor:pointer;">
+            📁 选择密文文件
+            <input type="file" id="fileInput" accept=".bin,.enc,.dat,application/octet-stream" hidden>
+        </label>
+        <span id="fileNameDisplay" style="color:#9bb7dd; margin-left:auto;"></span>
+    </div>
+
+    <button class="btn" id="decryptBtn" style="width:100%;">🔓 解密并准备站点</button>
+
+    <div class="status-box" id="statusArea">⏳ 等待操作…</div>
+
+    <div id="resultPanel" class="result-panel" style="display:none;">
+        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 10px;">
+            <span class="mode-indicator" id="modeIndicator">⚡ 模式: 检测中</span>
+            <span id="swStatusDetail" style="font-size:0.9rem;"></span>
+        </div>
+
+        <!-- Service Worker 模式操作 -->
+        <div id="swModePanel" style="display:none;">
+            <button class="btn open-btn" id="openSiteBtn">🌐 打开完整站点 (1/index.html)</button>
+            <p style="margin-top: 10px; font-size:0.9rem;">站点挂载于 <code id="basePathDisplay">/decrypted/</code> ，内部链接均可正常访问。</p>
+        </div>
+
+        <!-- 降级模式操作 -->
+        <div id="fallbackModePanel" style="display:none;">
+            <div class="warning-box">
+                ⚠️ Service Worker 未能启用，无法提供跨页面跳转。但您可以：
+            </div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button class="btn" id="downloadZipBtn">⬇️ 下载完整解密 ZIP</button>
+                <button class="btn btn-outline" id="previewIndexBtn">👁️ 预览 1/index.html (单页)</button>
+            </div>
+            <div style="margin-top: 16px;">
+                <strong>📁 解密文件列表 (点击预览单个文件):</strong>
+                <div class="file-list" id="fileListView">—</div>
+                <p style="font-size:0.8rem; margin-top:8px;">💡 建议下载 ZIP 后解压，本地打开 <code>1/index.html</code> 即可获得完整功能。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (() => {
+        "use strict";
+
+        // DOM
+        const passwordInput = document.getElementById('passwordInput');
+        const resetNBtn = document.getElementById('resetN');
+        const fileInput = document.getElementById('fileInput');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        const loadDefaultBtn = document.getElementById('loadDefaultBtn');
+        const decryptBtn = document.getElementById('decryptBtn');
+        const statusArea = document.getElementById('statusArea');
+        const resultPanel = document.getElementById('resultPanel');
+        const modeIndicator = document.getElementById('modeIndicator');
+        const swStatusDetail = document.getElementById('swStatusDetail');
+        const swModePanel = document.getElementById('swModePanel');
+        const fallbackModePanel = document.getElementById('fallbackModePanel');
+        const openSiteBtn = document.getElementById('openSiteBtn');
+        const downloadZipBtn = document.getElementById('downloadZipBtn');
+        const previewIndexBtn = document.getElementById('previewIndexBtn');
+        const fileListView = document.getElementById('fileListView');
+
+        // 状态变量
+        let currentFileBuffer = null;
+        let currentFileName = '';
+        let decryptedZip = null;
+        let swRegistration = null;
+        let swEnabled = false;
+        let fileList = [];
+        let indexHtmlBlobUrl = null;
+        const SW_SCOPE = '/decrypted/';
+
+        resetNBtn.addEventListener('click', () => { passwordInput.value = 4096; });
+
+        function setStatus(msg, isError = false) {
+            statusArea.innerHTML = msg;
+            statusArea.style.color = isError ? '#ffa098' : '#b7d0f0';
+        }
+        function appendStatus(msg, isError = false) {
+            statusArea.innerHTML += '<br>' + msg;
+        }
+
+        function resetUI() {
+            resultPanel.style.display = 'none';
+            swModePanel.style.display = 'none';
+            fallbackModePanel.style.display = 'none';
+            swEnabled = false;
+            fileList = [];
+            if (indexHtmlBlobUrl) { URL.revokeObjectURL(indexHtmlBlobUrl); indexHtmlBlobUrl = null; }
+        }
+
+        // 读取文件
+        function readFileAsBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const fr = new FileReader();
+                fr.onload = e => resolve(e.target.result);
+                fr.onerror = () => reject(new Error('读取失败'));
+                fr.readAsArrayBuffer(file);
+            });
+        }
+
+        async function loadDefault() {
+            setStatus('🔄 请求 encrypted.bin ...');
+            try {
+                const res = await fetch('encrypted.bin');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const buf = await res.arrayBuffer();
+                if (buf.byteLength === 0) throw new Error('空文件');
+                currentFileBuffer = buf;
+                currentFileName = 'encrypted.bin';
+                fileNameDisplay.textContent = `✅ ${currentFileName} (${(buf.byteLength/1024).toFixed(1)} KB)`;
+                setStatus(`✅ 默认密文加载成功，${(buf.byteLength/1024).toFixed(2)} KB`);
+                resetUI();
+            } catch (e) {
+                setStatus(`⚠️ 默认加载失败: ${e.message}，请手动选择`, true);
+                fileNameDisplay.textContent = '❌ 未加载';
+            }
+        }
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                setStatus('📥 读取文件中...');
+                const buf = await readFileAsBuffer(file);
+                currentFileBuffer = buf;
+                currentFileName = file.name;
+                fileNameDisplay.textContent = `📎 ${file.name} (${(buf.byteLength/1024).toFixed(1)} KB)`;
+                setStatus(`✅ 已选择: ${file.name}`);
+                resetUI();
+            } catch (err) {
+                setStatus(`❌ 读取错误: ${err.message}`, true);
+            }
+        });
+
+        loadDefaultBtn.addEventListener('click', loadDefault);
+
+        // 字节取反
+        function invertBytes(buffer, n) {
+            const view = new Uint8Array(buffer);
+            const limit = Math.min(n, view.length);
+            for (let i = 0; i < limit; i++) view[i] = (~view[i]) & 0xFF;
+            return buffer;
+        }
+
+        // ---------- Service Worker 逻辑 ----------
+        async function tryRegisterSW() {
+            if (!navigator.serviceWorker) {
+                throw new Error('浏览器不支持 Service Worker');
+            }
+            // 检查安全上下文
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && !location.hostname.startsWith('127.')) {
+                throw new Error('非安全上下文 (需要 HTTPS 或 localhost)');
+            }
+
+            // 注销旧 SW
+            const existing = await navigator.serviceWorker.getRegistrations();
+            for (let reg of existing) {
+                if (reg.scope.includes(SW_SCOPE) || reg.scope === location.origin + '/') {
+                    await reg.unregister();
+                }
+            }
+
+            const swCode = `
+                const CACHE_NAME = 'decrypted-vfs-v1';
+                let zipFilesMap = null;
+
+                self.addEventListener('message', (event) => {
+                    if (event.data && event.data.type === 'SET_ZIP_FILES') {
+                        zipFilesMap = new Map(event.data.files);
+                        console.log('[SW] 已接收文件映射，共 ' + zipFilesMap.size + ' 个');
+                    }
+                });
+
+                self.addEventListener('fetch', (event) => {
+                    const url = new URL(event.request.url);
+                    if (!url.pathname.startsWith('/decrypted/')) return;
+
+                    event.respondWith(
+                        (async () => {
+                            if (!zipFilesMap) {
+                                return new Response('SW 未收到数据', { status: 503 });
+                            }
+                            let relativePath = url.pathname.slice('/decrypted/'.length);
+                            if (relativePath === '') relativePath = 'index.html';
+                            
+                            let entry = zipFilesMap.get(relativePath);
+                            if (!entry) {
+                                // 尝试不区分大小写
+                                for (let [key, val] of zipFilesMap.entries()) {
+                                    if (key.toLowerCase() === relativePath.toLowerCase()) {
+                                        entry = val;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!entry) {
+                                return new Response('Not found: ' + relativePath, { status: 404 });
+                            }
+
+                            const mime = getMime(relativePath);
+                            return new Response(entry.content, {
+                                status: 200,
+                                headers: { 'Content-Type': mime, 'Cache-Control': 'no-store' }
+                            });
+                        })()
+                    );
+                });
+
+                function getMime(path) {
+                    const ext = path.split('.').pop().toLowerCase();
+                    const map = {
+                        'html': 'text/html', 'htm': 'text/html', 'css': 'text/css', 'js': 'application/javascript',
+                        'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif',
+                        'svg': 'image/svg+xml', 'json': 'application/json', 'txt': 'text/plain'
+                    };
+                    return map[ext] || 'application/octet-stream';
+                }
+
+                self.addEventListener('install', () => self.skipWaiting());
+                self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
+            `;
+            const blob = new Blob([swCode], { type: 'application/javascript' });
+            const swUrl = URL.createObjectURL(blob);
+            const reg = await navigator.serviceWorker.register(swUrl, { scope: SW_SCOPE });
+            URL.revokeObjectURL(swUrl);
+            
+            // 等待激活
+            if (reg.installing) {
+                await new Promise(r => { reg.installing.addEventListener('statechange', (e) => { if (e.target.state === 'activated') r(); }); });
+            } else if (reg.waiting) {
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                await new Promise(r => { reg.waiting.addEventListener('statechange', (e) => { if (e.target.state === 'activated') r(); }); });
+            }
+            swRegistration = reg;
+            return reg;
+        }
+
+        async function sendFilesToSW(zip) {
+            const sw = swRegistration.active || swRegistration.installing || swRegistration.waiting;
+            if (!sw) throw new Error('SW 未激活');
+            
+            const filesArray = [];
+            const paths = [];
+            zip.forEach((path, file) => { if (!file.dir) paths.push(path); });
+            
+            const entries = await Promise.all(paths.map(async p => {
+                const data = await zip.file(p).async('uint8array');
+                return [p, { content: data }];
+            }));
+            
+            sw.postMessage({ type: 'SET_ZIP_FILES', files: entries });
+            await new Promise(r => setTimeout(r, 100));
+            fileList = paths;
+        }
+
+        // 降级模式：构建文件列表及预览
+        function buildFallbackUI(zip) {
+            const files = [];
+            zip.forEach((path, file) => { if (!file.dir) files.push(path); });
+            fileList = files;
+            
+            // 生成文件列表HTML
+            const html = files.map(f => {
+                return `<div class="file-item">📄 ${f} <a href="#" data-path="${f}" class="preview-link">预览</a></div>`;
+            }).join('');
+            fileListView.innerHTML = html;
+            
+            // 绑定预览事件
+            document.querySelectorAll('.preview-link').forEach(link => {
+                link.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    const path = link.dataset.path;
+                    const file = zip.file(path);
+                    if (!file) return;
+                    const blob = await file.async('blob');
+                    const url = URL.createObjectURL(blob);
+                    window.open(url, '_blank');
+                    // 注意：不revoke，让页面持有
+                });
+            });
+            
+            // 准备 index.html 预览 Blob
+            const indexFile = zip.file('1/index.html') || zip.file('index.html') || files.find(f => f.endsWith('.html') || f.endsWith('.htm'));
+            if (indexFile) {
+                indexFile.async('blob').then(blob => {
+                    indexHtmlBlobUrl = URL.createObjectURL(blob);
+                });
+            }
+        }
+
+        // 主流程
+        async function decryptAndPrepare() {
+            if (!currentFileBuffer) {
+                setStatus('❌ 没有密文数据', true); return;
+            }
+            const n = parseInt(passwordInput.value, 10);
+            if (isNaN(n) || n <= 0) { setStatus('❌ 密码 n 无效', true); return; }
+
+            resetUI();
+            setStatus('🔐 字节取反解密中 (前 ' + n + ' 字节) ...');
+            
+            try {
+                const decrypted = currentFileBuffer.slice(0);
+                invertBytes(decrypted, n);
+                
+                appendStatus('📦 解压 ZIP ...');
+                const zip = await JSZip.loadAsync(decrypted, { checkCRC32: false });
+                decryptedZip = zip;
+                
+                let fileCount = 0;
+                zip.forEach(() => fileCount++);
+                if (fileCount === 0) throw new Error('ZIP 内无文件');
+                
+                // 尝试启用 SW
+                let swSuccess = false;
+                try {
+                    await tryRegisterSW();
+                    swSuccess = true;
+                } catch (swErr) {
+                    console.warn('SW 注册失败:', swErr);
+                    swSuccess = false;
+                }
+                
+                if (swSuccess) {
+                    await sendFilesToSW(zip);
+                    swEnabled = true;
+                    modeIndicator.textContent = '⚡ 模式: Service Worker (虚拟站点)';
+                    swStatusDetail.textContent = `✅ 挂载于 ${SW_SCOPE}`;
+                    swModePanel.style.display = 'block';
+                    fallbackModePanel.style.display = 'none';
+                    setStatus('🎉 解密成功！虚拟站点已就绪。');
+                } else {
+                    // 降级模式
+                    swEnabled = false;
+                    modeIndicator.textContent = '📦 模式: 降级 (本地预览/下载)';
+                    swStatusDetail.textContent = 'Service Worker 未启用';
+                    fallbackModePanel.style.display = 'block';
+                    swModePanel.style.display = 'none';
+                    
+                    buildFallbackUI(zip);
+                    setStatus('✅ 解密完成 (SW未启用)。可下载 ZIP 或预览单个文件。');
+                }
+                
+                resultPanel.style.display = 'block';
+                
+            } catch (err) {
+                console.error(err);
+                setStatus(`❌ 解密失败: ${err.message}`, true);
+                decryptedZip = null;
+            }
+        }
+
+        // 打开 SW 站点
+        function openSite() {
+            if (!swEnabled) return;
+            const target = location.origin + SW_SCOPE + '1/index.html';
+            const win = window.open(target, '_blank');
+            if (!win) alert('浏览器阻止了弹窗，请允许或复制链接:\n' + target);
+        }
+
+        // 下载 ZIP
+        async function downloadZip() {
+            if (!decryptedZip) return;
+            try {
+                const blob = await decryptedZip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `decrypted_${Date.now()}.zip`;
+                a.click();
+                URL.revokeObjectURL(url);
+                setStatus('✅ ZIP 下载开始');
+            } catch (e) {
+                setStatus(`❌ 下载失败: ${e.message}`, true);
+            }
+        }
+
+        function previewIndex() {
+            if (indexHtmlBlobUrl) {
+                window.open(indexHtmlBlobUrl, '_blank');
+            } else {
+                alert('未找到 index.html');
+            }
+        }
+
+        // 事件绑定
+        decryptBtn.addEventListener('click', decryptAndPrepare);
+        openSiteBtn.addEventListener('click', openSite);
+        downloadZipBtn.addEventListener('click', downloadZip);
+        previewIndexBtn.addEventListener('click', previewIndex);
+
+        // 初始化
+        loadDefault();
+    })();
+</script>
+</body>
+</html>
